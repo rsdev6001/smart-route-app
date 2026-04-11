@@ -1,5 +1,6 @@
 import "package:flutter/material.dart";
 import "package:flutter_map/flutter_map.dart";
+import "package:flutter_dotenv/flutter_dotenv.dart";
 import "package:geolocator/geolocator.dart";
 import "package:latlong2/latlong.dart";
 import "package:smart_route/config/app_config.dart";
@@ -10,8 +11,9 @@ import "package:smart_route/services/ev_route_planner.dart";
 import "package:smart_route/services/geocoding_service.dart";
 import "package:smart_route/services/routing_service.dart";
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   runApp(const SmartRouteApp());
 }
 
@@ -43,13 +45,23 @@ class _SmartRouteHomePageState extends State<SmartRouteHomePage> {
   final TextEditingController _originController = TextEditingController();
   final TextEditingController _destinationController = TextEditingController();
 
+  List<PlaceSuggestion> _originSuggestions = <PlaceSuggestion>[];
+  List<PlaceSuggestion> _destinationSuggestions = <PlaceSuggestion>[];
+  PlaceSuggestion? _selectedOriginSuggestion;
+  PlaceSuggestion? _selectedDestinationSuggestion;
+
   VehicleProfile _selectedVehicle = vehicleProfiles[1];
   RoutePlan? _routePlan;
   bool _isLoading = false;
+  bool _isOriginAutocompleteLoading = false;
+  bool _isDestinationAutocompleteLoading = false;
   String? _error;
 
   late final EvRoutePlanner _planner = EvRoutePlanner(
-    geocodingService: GeocodingService(userAgent: AppConfig.userAgent),
+    geocodingService: GeocodingService(
+      userAgent: AppConfig.userAgent,
+      orsApiKey: AppConfig.orsApiKey,
+    ),
     routingService: RoutingService(apiKey: AppConfig.orsApiKey),
     chargingService: ChargingService(),
   );
@@ -110,9 +122,18 @@ class _SmartRouteHomePageState extends State<SmartRouteHomePage> {
     });
 
     try {
+      final String originQuery = _queryForRouting(
+        _originController.text.trim(),
+        _selectedOriginSuggestion,
+      );
+      final String destinationQuery = _queryForRouting(
+        _destinationController.text.trim(),
+        _selectedDestinationSuggestion,
+      );
+
       final RoutePlan plan = await _planner.buildPlan(
-        originQuery: _originController.text.trim(),
-        destinationQuery: _destinationController.text.trim(),
+        originQuery: originQuery,
+        destinationQuery: destinationQuery,
         vehicle: _selectedVehicle,
       );
       if (!mounted) return;
@@ -130,6 +151,132 @@ class _SmartRouteHomePageState extends State<SmartRouteHomePage> {
         _isLoading = false;
       });
     }
+  }
+
+  String _queryForRouting(String text, PlaceSuggestion? selected) {
+    if (selected == null) return text;
+    if (text != selected.name) return text;
+    return "${selected.location.latitude}, ${selected.location.longitude}";
+  }
+
+  Future<void> _handleOriginChanged(String value) async {
+    _selectedOriginSuggestion = null;
+    if (!value.endsWith(" ")) {
+      if (_originSuggestions.isNotEmpty) {
+        setState(() => _originSuggestions = <PlaceSuggestion>[]);
+      }
+      return;
+    }
+    await _loadOriginSuggestions(value);
+  }
+
+  Future<void> _handleDestinationChanged(String value) async {
+    _selectedDestinationSuggestion = null;
+    if (!value.endsWith(" ")) {
+      if (_destinationSuggestions.isNotEmpty) {
+        setState(() => _destinationSuggestions = <PlaceSuggestion>[]);
+      }
+      return;
+    }
+    await _loadDestinationSuggestions(value);
+  }
+
+  Future<void> _loadOriginSuggestions(String query) async {
+    setState(() {
+      _isOriginAutocompleteLoading = true;
+    });
+    try {
+      final List<PlaceSuggestion> results = await _planner.geocodingService.autocompletePlaces(query);
+      if (!mounted) return;
+      setState(() {
+        _originSuggestions = results;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _originSuggestions = <PlaceSuggestion>[];
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isOriginAutocompleteLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadDestinationSuggestions(String query) async {
+    setState(() {
+      _isDestinationAutocompleteLoading = true;
+    });
+    try {
+      final List<PlaceSuggestion> results = await _planner.geocodingService.autocompletePlaces(query);
+      if (!mounted) return;
+      setState(() {
+        _destinationSuggestions = results;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _destinationSuggestions = <PlaceSuggestion>[];
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isDestinationAutocompleteLoading = false;
+      });
+    }
+  }
+
+  void _chooseOriginSuggestion(PlaceSuggestion suggestion) {
+    setState(() {
+      _selectedOriginSuggestion = suggestion;
+      _originController.text = suggestion.name;
+      _originSuggestions = <PlaceSuggestion>[];
+    });
+  }
+
+  void _chooseDestinationSuggestion(PlaceSuggestion suggestion) {
+    setState(() {
+      _selectedDestinationSuggestion = suggestion;
+      _destinationController.text = suggestion.name;
+      _destinationSuggestions = <PlaceSuggestion>[];
+    });
+  }
+
+  Widget _suggestionList({
+    required List<PlaceSuggestion> suggestions,
+    required bool isLoading,
+    required ValueChanged<PlaceSuggestion> onTap,
+  }) {
+    if (isLoading) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+    if (suggestions.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      constraints: const BoxConstraints(maxHeight: 180),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: suggestions.length,
+        itemBuilder: (BuildContext context, int index) {
+          final PlaceSuggestion s = suggestions[index];
+          return ListTile(
+            dense: true,
+            leading: const Icon(Icons.place, size: 18),
+            title: Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+            onTap: () => onTap(s),
+          );
+        },
+      ),
+    );
   }
 
   List<Marker> _buildMarkers() {
@@ -188,20 +335,32 @@ class _SmartRouteHomePageState extends State<SmartRouteHomePage> {
                   children: <Widget>[
                     TextField(
                       controller: _originController,
+                      onChanged: _handleOriginChanged,
                       decoration: const InputDecoration(
                         labelText: "Your location",
                         prefixIcon: Icon(Icons.near_me),
                         border: OutlineInputBorder(),
                       ),
                     ),
+                    _suggestionList(
+                      suggestions: _originSuggestions,
+                      isLoading: _isOriginAutocompleteLoading,
+                      onTap: _chooseOriginSuggestion,
+                    ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: _destinationController,
+                      onChanged: _handleDestinationChanged,
                       decoration: const InputDecoration(
                         labelText: "Destination",
                         prefixIcon: Icon(Icons.place_outlined),
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                    _suggestionList(
+                      suggestions: _destinationSuggestions,
+                      isLoading: _isDestinationAutocompleteLoading,
+                      onTap: _chooseDestinationSuggestion,
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<VehicleProfile>(

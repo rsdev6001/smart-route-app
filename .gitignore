@@ -1,3 +1,13 @@
+.dart_tool/
+.packages
+build/
+
+# IDE
+.idea/
+.vscode/
+
+# Secrets
+.env
 # Miscellaneous
 *.class
 *.log
