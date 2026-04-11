@@ -14,6 +14,7 @@ class ChargingService {
       "api.openchargemap.io",
       "/v3/poi/",
       <String, String>{
+        "key": "ef1ca54f-14d2-410f-8ceb-a5ad7d73ac3f",
         "output": "json",
         "latitude": center.latitude.toString(),
         "longitude": center.longitude.toString(),
@@ -25,21 +26,26 @@ class ChargingService {
       },
     );
 
-    final response = await http.get(uri, headers: const <String, String>{"X-API-Key": ""});
+    final response =
+        await http.get(uri, headers: const <String, String>{"X-API-Key": ""});
     if (response.statusCode != 200) {
-      throw Exception("Charging stations fetch failed (${response.statusCode})");
+      throw Exception(
+          "Charging stations fetch failed (${response.statusCode})");
     }
 
     final List<dynamic> items = jsonDecode(response.body) as List<dynamic>;
     return items.map((dynamic item) {
       final Map<String, dynamic> p = item as Map<String, dynamic>;
-      final Map<String, dynamic> info = p["AddressInfo"] as Map<String, dynamic>;
+      final Map<String, dynamic> info =
+          p["AddressInfo"] as Map<String, dynamic>;
       final List<dynamic>? connections = p["Connections"] as List<dynamic>?;
 
       final String connectionInfo = (connections == null || connections.isEmpty)
           ? "Connector details unavailable"
-          : (connections.first as Map<String, dynamic>)["ConnectionType"]?["Title"]?.toString() ??
-                "Connector details unavailable";
+          : (connections.first as Map<String, dynamic>)["ConnectionType"]
+                      ?["Title"]
+                  ?.toString() ??
+              "Connector details unavailable";
 
       return ChargingStation(
         id: p["ID"].toString(),
